@@ -40,3 +40,5 @@ Put your Anthropic API key in `.env` (see `.env.example`). `.env`, `config/profi
 - Never auto-submit. Prefill stops before the final Submit button.
 - Only use public job-board APIs or pages; no scraping behind logins, no CAPTCHA bypassing.
 - Never commit personal data, resumes, or API keys.
+
+Owner: Kehan
