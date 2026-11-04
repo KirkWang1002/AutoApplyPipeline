@@ -1,0 +1,20 @@
+# Copy to config/profile.yaml (git-ignored) and fill in your real info.
+name: Jane Doe
+email: jane@example.com
+phone: "555-000-0000"
+location: Raleigh, NC
+links:
+  linkedin: https://www.linkedin.com/in/example
+  github: https://github.com/example
+education:
+  - school: Example University
+    degree: B.S. Electrical Engineering
+    grad: 2027-05
+work_authorization: "Authorized to work in the US"
+target:
+  titles: ["Hardware Engineer Intern", "Embedded Software Intern", "Electrical Engineering Intern"]
+  locations: ["Remote", "NC", "CA", "TX"]
+  exclude_title_words: ["Senior", "Staff", "Principal", "Manager", "Director"]
+  posted_within_days: 14
+skills: [Python, C, LTspice, PCB design, MATLAB]
+min_score_to_tailor: 4

@@ -1,0 +1,23 @@
+# Personal data — never commit
+.env
+config/profile.yaml
+config/companies.yaml
+resume/
+data/
+out/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+dist/
+build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

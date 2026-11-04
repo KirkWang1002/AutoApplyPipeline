@@ -1,0 +1,8 @@
+# Copy to config/companies.yaml and list the companies you want to watch.
+# `board` is the company's slug on that ATS (the part in the careers URL).
+greenhouse:
+  - board: anthropic
+lever:
+  - board: example-company
+ashby:
+  - board: example-company

@@ -1,0 +1,27 @@
+[project]
+name = "autoapply"
+version = "0.1.0"
+description = "Human-in-the-loop job application pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic",
+    "httpx",
+    "pydantic",
+    "pyyaml",
+    "python-dotenv",
+    "typer",
+]
+
+[project.optional-dependencies]
+prefill = ["playwright"]
+dev = ["pytest"]
+
+[project.scripts]
+autoapply = "autoapply.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
