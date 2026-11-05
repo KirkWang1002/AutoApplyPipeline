@@ -1,0 +1,70 @@
+[
+  {
+    "id": "aaaa-1111",
+    "text": "Embedded Software Intern",
+    "hostedUrl": "https://jobs.lever.co/widgetco/aaaa-1111",
+    "categories": {
+      "location": "San Francisco, CA",
+      "commitment": "Internship",
+      "team": "Firmware",
+      "allLocations": [
+        "San Francisco, CA",
+        "Austin, TX"
+      ]
+    },
+    "createdAt": 1793664000000,
+    "descriptionPlain": "Write firmware for tiny widgets.\n",
+    "workplaceType": "onsite",
+    "lists": [
+      {
+        "text": "What you'll do",
+        "content": "<li>Write C for ARM Cortex-M parts</li><li>Bring up new boards</li>"
+      },
+      {
+        "text": "Requirements",
+        "content": "<li>Pursuing a B.S. in EE or CS</li><li>Comfort with an oscilloscope &amp; logic analyzer</li>"
+      }
+    ],
+    "additionalPlain": "Widgetco is an equal opportunity employer.\n",
+    "additional": "<p>Widgetco is an equal opportunity employer.</p>"
+  },
+  {
+    "id": "aaaa-2222",
+    "text": "Embedded Software Internship",
+    "hostedUrl": "https://jobs.lever.co/widgetco/aaaa-2222",
+    "categories": {
+      "location": "Anywhere",
+      "commitment": "Internship",
+      "allLocations": [
+        "Anywhere"
+      ]
+    },
+    "createdAt": 1793750400000,
+    "descriptionPlain": "Remote firmware internship.",
+    "workplaceType": "remote"
+  },
+  {
+    "id": "aaaa-3333",
+    "text": "Marketing Intern",
+    "hostedUrl": "https://jobs.lever.co/widgetco/aaaa-3333",
+    "categories": {
+      "location": "Austin, TX",
+      "commitment": "Internship"
+    },
+    "createdAt": 1793664000000,
+    "descriptionPlain": "Make posters.",
+    "workplaceType": "onsite"
+  },
+  {
+    "id": "aaaa-4444",
+    "text": "Internal Tools Hardware Engineer",
+    "hostedUrl": "https://jobs.lever.co/widgetco/aaaa-4444",
+    "categories": {
+      "location": "Austin, TX",
+      "commitment": "Full-time"
+    },
+    "createdAt": 1793664000000,
+    "descriptionPlain": "Build test fixtures.",
+    "workplaceType": "onsite"
+  }
+]

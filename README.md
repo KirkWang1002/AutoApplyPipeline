@@ -35,10 +35,31 @@ copy config\companies.example.yaml config\companies.yaml
 Put your Anthropic API key in `.env` (see `.env.example`). `.env`, `config/profile.yaml`,
 `resume/` and `data/` are git-ignored so personal data never reaches GitHub.
 
+Put your master resume at `resume/master.md` (or `master.tex`). Tailoring only reorders,
+rephrases and selects from it.
+
+## Daily use
+
+```bash
+autoapply config                 # check profile + companies loaded
+autoapply discover               # new matching postings -> data/jobs.jsonl
+autoapply discover --all         # preview everything, unfiltered (not saved)
+autoapply score --min 4          # Claude rates fit 1-5 (cached; re-runs are free)
+autoapply tailor                 # resume.md + cover_letter.md per good job -> out/<company>-<role>/
+autoapply report                 # top jobs not applied yet + pending
+autoapply status <job_id> applied --notes "referral from X"
+```
+
+Read every file in `out/` before using it, and check `REVIEW_FLAGS.txt` if one was
+written: it lists numbers / names in the draft that are not in your master resume.
+
+Run tests with `python -m pytest`.
+
 ## Rules
 
 - Never auto-submit. Prefill stops before the final Submit button.
 - Only use public job-board APIs or pages; no scraping behind logins, no CAPTCHA bypassing.
 - Never commit personal data, resumes, or API keys.
+
 
 Owner: Kehan

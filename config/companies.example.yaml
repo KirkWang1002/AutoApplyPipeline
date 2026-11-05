@@ -1,8 +1,12 @@
 # Copy to config/companies.yaml and list the companies you want to watch.
 # `board` is the company's slug on that ATS (the part in the careers URL).
+# `name` (optional) is the display name used in output and cover letters; if omitted it is
+# derived from the slug ("example-company" -> "Example Company").
 greenhouse:
   - board: anthropic
+    name: Anthropic
 lever:
   - board: example-company
+    name: Example Company
 ashby:
   - board: example-company

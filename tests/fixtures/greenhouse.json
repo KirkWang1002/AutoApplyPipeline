@@ -1,0 +1,37 @@
+{
+  "jobs": [
+    {
+      "id": 1001,
+      "title": "Hardware Engineering Intern",
+      "absolute_url": "https://boards.greenhouse.io/acme-robotics/jobs/1001",
+      "location": {"name": "Austin, TX"},
+      "updated_at": "2026-11-01T09:30:00-04:00",
+      "content": "&lt;p&gt;Help us build &lt;strong&gt;robot&lt;/strong&gt; boards.&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Schematic capture&lt;/li&gt;&lt;li&gt;PCB bring-up &amp;amp; test&lt;/li&gt;&lt;/ul&gt;"
+    },
+    {
+      "id": 1002,
+      "title": "Senior Hardware Engineer Intern Mentor",
+      "absolute_url": "https://boards.greenhouse.io/acme-robotics/jobs/1002",
+      "location": {"name": "Remote - US"},
+      "updated_at": "2026-11-02T10:00:00Z",
+      "content": "&lt;p&gt;Lead the team.&lt;/p&gt;"
+    },
+    {
+      "id": 1003,
+      "title": "Hardware Engineer Intern",
+      "absolute_url": "https://boards.greenhouse.io/acme-robotics/jobs/1003",
+      "location": {"name": "Berlin, Germany"},
+      "updated_at": "2026-11-02T10:00:00Z",
+      "content": ""
+    },
+    {
+      "id": 1004,
+      "title": "Electrical Engineering Intern",
+      "absolute_url": "https://boards.greenhouse.io/acme-robotics/jobs/1004",
+      "location": {"name": "Raleigh, NC"},
+      "updated_at": "2026-09-01T10:00:00Z",
+      "content": "&lt;p&gt;Old posting.&lt;/p&gt;"
+    }
+  ],
+  "meta": {"total": 4}
+}
