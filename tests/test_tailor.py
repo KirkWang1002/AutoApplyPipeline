@@ -198,6 +198,7 @@ def cli_env(tmp_path: Path, monkeypatch):
     (data / "scores.jsonl").write_text("\n".join(s.model_dump_json() for s in scores) + "\n")
     monkeypatch.setattr(paths, "JOBS_FILE", data / "jobs.jsonl")
     monkeypatch.setattr(paths, "SCORES_FILE", data / "scores.jsonl")
+    monkeypatch.setattr(paths, "APPLICATIONS_FILE", data / "applications.csv")
     monkeypatch.setattr(paths, "OUT_DIR", out)
     monkeypatch.setattr(paths, "RESUME_DIR", resume)
     client = FakeClient()
@@ -231,6 +232,46 @@ def test_cli_tailor_happy_path(cli_env):
     result = runner.invoke(app, ["tailor", "--force"])
     assert result.exit_code == 0, result.output
     assert len(cli_env.client.messages.calls) == 4
+
+
+def test_cli_tailor_marks_tracker_drafted_without_downgrading(cli_env):
+    from autoapply import track
+    from autoapply.models import ApplicationStatus as S
+
+    first, second, third = (j.id for j in cli_env.jobs)
+    runner = CliRunner()
+    result = runner.invoke(app, ["tailor"])
+    assert result.exit_code == 0, result.output
+    records = track.load_applications(paths.APPLICATIONS_FILE)
+    assert records[first].status == S.drafted
+    assert records[second].status == S.scored  # score 2: not tailored
+    assert records[third].status == S.found
+
+    # Human applies; regenerating must not downgrade the record.
+    assert runner.invoke(app, ["status", first, "applied"]).exit_code == 0
+    result = runner.invoke(app, ["tailor", "--force"])
+    assert result.exit_code == 0, result.output
+    assert track.load_applications(paths.APPLICATIONS_FILE)[first].status == S.applied
+
+    # Output already on disk (tailored before tracking existed): the skip backfills.
+    paths.APPLICATIONS_FILE.unlink()
+    result = runner.invoke(app, ["tailor"])
+    assert result.exit_code == 0 and "skip" in result.output
+    assert track.load_applications(paths.APPLICATIONS_FILE)[first].status == S.drafted
+
+
+def test_cli_tailor_locked_tracker_is_friendly(cli_env, monkeypatch):
+    from autoapply import track
+
+    def locked(src, dst):
+        raise PermissionError(13, "in use")
+
+    monkeypatch.setattr(track.os, "replace", locked)
+    result = CliRunner().invoke(app, ["tailor"])
+    assert result.exit_code == 1
+    assert "close applications.csv in Excel and retry" in result.output
+    assert isinstance(result.exception, SystemExit)
+    assert (cli_env.out / "initech-firmware-intern" / "resume.md").exists()
 
 
 def test_cli_tailor_min_option(cli_env):
