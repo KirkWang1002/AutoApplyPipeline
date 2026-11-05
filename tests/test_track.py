@@ -1,3 +1,4 @@
+import csv
 from datetime import date
 from pathlib import Path
 
@@ -206,3 +207,140 @@ def test_cli_report(files: Path):
     assert job(2).id in top and job(1).id not in top
     assert job(1).id in pending
     assert files.exists()
+
+
+# ---------------------------------------------------------------- Excel-edited CSV
+
+
+HEADER = ",".join(ApplicationRecord.model_fields)
+
+
+def write_raw(path: Path, lines: list[str], bom: bool = True) -> None:
+    path.write_bytes((("﻿" if bom else "") + "\r\n".join(lines) + "\r\n").encode("utf-8"))
+
+
+def test_load_excel_saved_csv(tmp_path: Path):
+    p = tmp_path / "applications.csv"
+    write_raw(p, [
+        HEADER,
+        "a:1,Acme,Intern 1,https://x/1, Applied ,4,11/5/2026,",
+        "a:2,Acme,Intern 2,https://x/2,SCORED,,3/9/26,note",
+        "a:3,Acme,Intern 3,https://x/3,found,,2026-03-01,",
+        ",,,,,,,",  # blank row Excel leaves behind
+    ])
+    recs = track.load_applications(p)
+    assert set(recs) == {"a:1", "a:2", "a:3"}
+    assert (recs["a:1"].status, recs["a:1"].score, recs["a:1"].updated) == (S.applied, 4, date(2026, 11, 5))
+    assert (recs["a:2"].status, recs["a:2"].score, recs["a:2"].updated) == (S.scored, None, date(2026, 3, 9))
+    assert recs["a:3"].updated == date(2026, 3, 1)
+
+
+def test_invalid_rows_warn_skip_and_survive_save(tmp_path: Path, capsys):
+    p = tmp_path / "applications.csv"
+    write_raw(p, [
+        HEADER,
+        "a:1,Acme,Intern 1,https://x/1,applied,4,2026-03-01,",
+        "a:2,Acme,Intern 2,https://x/2,ghosted,,2026-03-01,typo",
+        "a:3,Acme,Intern 3,https://x/3,found,high,someday,",
+    ])
+    recs = track.load_applications(p)
+    assert set(recs) == {"a:1"}
+    err = capsys.readouterr().err
+    assert "row 3" in err and "ghosted" in err and "row 4" in err
+
+    # Saving must not silently delete the rows the human still has to fix.
+    track.set_status(recs, "a:1", S.interview, today=TODAY)
+    track.save_applications(recs, p)
+    lines = p.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == HEADER
+    assert lines[1].startswith("a:1,") and ",interview," in lines[1]
+    assert "a:2,Acme,Intern 2,https://x/2,ghosted,,2026-03-01,typo" in lines
+    assert "a:3,Acme,Intern 3,https://x/3,found,high,someday," in lines
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['=HYPERLINK("http://evil")', "+1", "-2", "@SUM(A1)", "\tx", "\rx", "'=already", "''+x",
+     "'plain quote", "normal"],
+)
+def test_formula_cells_escaped_and_roundtrip(tmp_path: Path, value: str):
+    p = tmp_path / "applications.csv"
+    r = rec(1, S.found, notes=value)
+    r.title = value
+    r.company = value
+    track.save_applications({r.job_id: r}, p)
+    with p.open(newline="", encoding="utf-8") as f:
+        row = next(csv.DictReader(f))
+    dangerous = value.lstrip("'")[:1] in ("=", "+", "-", "@", "\t", "\r")
+    for field in ("title", "company", "notes"):
+        assert row[field] == ("'" + value if dangerous else value)
+    assert track.load_applications(p) == {r.job_id: r}
+
+
+def _locked_replace(src, dst):
+    raise PermissionError(13, "The process cannot access the file")
+
+
+def test_save_permission_error_is_friendly(tmp_path: Path, monkeypatch):
+    p = tmp_path / "applications.csv"
+    monkeypatch.setattr(track.os, "replace", _locked_replace)
+    with pytest.raises(track.ApplicationsFileLocked, match="close applications.csv in Excel"):
+        track.save_applications({job(1).id: rec(1, S.found)}, p)
+    assert list(tmp_path.iterdir()) == []  # temp file cleaned up
+
+
+# ---------------------------------------------------------------- mark_drafted
+
+
+def test_mark_drafted_only_upgrades_found_and_scored():
+    old = date(2026, 1, 1)
+    records = {
+        r.job_id: r
+        for r in [rec(1, S.found, updated=old), rec(2, S.scored, score=4, updated=old),
+                  rec(3, S.applied, updated=old), rec(4, S.interview, updated=old),
+                  rec(5, S.drafted, updated=old)]
+    }
+    ids = [job(n).id for n in range(1, 6)] + ["unknown:1"]
+    assert track.mark_drafted(records, ids, today=TODAY) == [job(1).id, job(2).id]
+    statuses = [records[job(n).id].status for n in range(1, 6)]
+    assert statuses == [S.drafted, S.drafted, S.applied, S.interview, S.drafted]
+    assert records[job(1).id].updated == TODAY
+    assert records[job(3).id].updated == old
+
+
+# ---------------------------------------------------------------- CLI: no needless writes
+
+
+def test_report_does_not_rewrite_unchanged_file(files: Path, monkeypatch):
+    runner = CliRunner()
+    assert runner.invoke(app, ["report"]).exit_code == 0  # first run creates the file
+    assert files.exists()
+    monkeypatch.setattr(track, "save_applications", lambda *a, **k: pytest.fail("rewrote file"))
+    result = runner.invoke(app, ["report"])
+    assert result.exit_code == 0, result.output
+
+
+def test_report_reads_excel_file_without_rewriting(files: Path, monkeypatch):
+    write_raw(files, [
+        HEADER,
+        f"{job(1).id},Acme,Hardware Intern 1,https://example.com/jobs/1,Applied,,3/1/2026,",
+        f"{job(2).id},Acme,Hardware Intern 2,https://example.com/jobs/2,scored,5,3/1/2026,",
+        "junk,Acme,X,https://x,ghosted,,3/1/2026,",
+    ])
+    before = files.read_bytes()
+    monkeypatch.setattr(track, "save_applications", lambda *a, **k: pytest.fail("rewrote file"))
+    result = CliRunner().invoke(app, ["report"])
+    assert result.exit_code == 0, result.output
+    assert "skipping invalid row 4" in result.output
+    assert job(1).id in result.output[result.output.index("Pending"):]
+    assert files.read_bytes() == before
+
+
+@pytest.mark.parametrize("args", [["report"], ["status", job(1).id, "applied"]])
+def test_cli_locked_file_message(files: Path, monkeypatch, args):
+    monkeypatch.setattr(track.os, "replace", _locked_replace)
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code == 1
+    assert "close applications.csv in Excel and retry" in result.output
+    assert "Traceback" not in result.output
+    assert isinstance(result.exception, SystemExit)

@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import csv
 import os
+import re
+import sys
 import tempfile
 from collections import Counter
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 
+from pydantic import ValidationError
 
 from autoapply.models import ApplicationRecord, ApplicationStatus, Job, ScoreResult
 from autoapply import paths, storage
@@ -37,51 +40,149 @@ PENDING = {ApplicationStatus.drafted, ApplicationStatus.applied}
 # ---------------------------------------------------------------- file I/O
 
 
-def load_applications(path: Path | None = None) -> dict[str, ApplicationRecord]:
-    """Read applications.csv into {job_id: record}. Missing file -> empty dict."""
-    path = Path(path) if path is not None else paths.APPLICATIONS_FILE
-    if not path.exists():
-        return {}
+# The owner edits applications.csv in Excel, which adds a UTF-8 BOM, rewrites dates as
+# 11/5/2026, and lets a human type "Applied ". Reading tolerates all of that.
+_DATE_FORMATS = ("%m/%d/%Y", "%m/%d/%y")
+
+# CSV formula injection: titles/notes come from untrusted postings, and Excel runs a
+# cell starting with = + - @ (or tab/CR) as a formula. Such cells are written with a
+# leading ' and read back without it. A value that already starts with quote(s) and
+# then one of those characters gets one more quote, so the round-trip is lossless.
+_FORMULA_LIKE = re.compile(r"^'*[=+\-@\t\r]")
+
+
+class ApplicationsFileLocked(RuntimeError):
+    """applications.csv could not be written (on Windows: usually open in Excel)."""
+
+
+def _escape_cell(value: str) -> str:
+    return "'" + value if _FORMULA_LIKE.match(value) else value
+
+
+def _unescape_cell(value: str) -> str:
+    return value[1:] if value.startswith("'") and _FORMULA_LIKE.match(value) else value
+
+
+def _parse_date(value: str) -> date | str:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        pass
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            pass
+    return value  # let pydantic reject it with a readable message
+
+
+def _parse_row(data: dict[str, str]) -> ApplicationRecord:
+    """Validate one (already unescaped) CSV row. Raises ValueError on bad data."""
+    data = dict(data)
+    for key in ("job_id", "status", "score", "updated"):
+        data[key] = data.get(key, "").strip()
+    if not data["job_id"]:
+        raise ValueError("job_id is empty")
+    data["status"] = data["status"].lower()
+    if not data["status"]:
+        data.pop("status")  # model default: found
+    data["score"] = data["score"] or None
+    if data["updated"]:
+        data["updated"] = _parse_date(data["updated"])
+    else:
+        data.pop("updated")  # model default: today
+    return ApplicationRecord.model_validate(data)
+
+
+def _describe(err: ValueError) -> str:
+    if isinstance(err, ValidationError):
+        return "; ".join(
+            f"{'.'.join(map(str, e['loc']))}: {e['msg']} (got {e.get('input')!r})"
+            for e in err.errors()
+        )
+    return str(err)
+
+
+def _read_rows(path: Path, warn: bool) -> tuple[dict[str, ApplicationRecord], list[dict[str, str]]]:
+    """Return (valid records by job_id, raw rows that failed validation)."""
     records: dict[str, ApplicationRecord] = {}
-    with path.open(newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            data = {k: v for k, v in row.items() if k in FIELDS}
-            if data.get("score") in ("", None):
-                data["score"] = None
-            if not data.get("updated"):
-                data.pop("updated", None)
-            data["notes"] = data.get("notes") or ""
-            rec = ApplicationRecord.model_validate(data)
+    bad: list[dict[str, str]] = []
+    if not path.exists():
+        return records, bad
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        # Row numbers match what Excel shows (header is row 1).
+        for rownum, row in enumerate(csv.DictReader(f), 2):
+            data = {
+                k.strip(): _unescape_cell(v or "")
+                for k, v in row.items()
+                if isinstance(k, str) and k.strip() in FIELDS
+            }
+            if not any(v.strip() for v in data.values()):
+                continue  # blank line Excel left behind
+            try:
+                rec = _parse_row(data)
+            except ValueError as e:  # includes pydantic.ValidationError
+                bad.append(data)
+                if warn:
+                    print(
+                        f"warning: skipping invalid row {rownum} in {path}: {_describe(e)}",
+                        file=sys.stderr,
+                    )
+                continue
             records[rec.job_id] = rec
-    return records
+    return records, bad
+
+
+def load_applications(path: Path | None = None) -> dict[str, ApplicationRecord]:
+    """Read applications.csv into {job_id: record}. Missing file -> empty dict.
+
+    Rows that cannot be parsed are skipped with a warning on stderr. `save_applications`
+    keeps them in the file verbatim, so a hand-typed typo is never silently lost.
+    """
+    path = Path(path) if path is not None else paths.APPLICATIONS_FILE
+    return _read_rows(path, warn=True)[0]
+
+
+def _to_row(rec: ApplicationRecord) -> dict[str, str]:
+    return {
+        "job_id": rec.job_id,
+        "company": rec.company,
+        "title": rec.title,
+        "url": rec.url,
+        "status": rec.status.value,
+        "score": "" if rec.score is None else str(rec.score),
+        "updated": rec.updated.isoformat(),
+        "notes": rec.notes,
+    }
 
 
 def save_applications(records: dict[str, ApplicationRecord], path: Path | None = None) -> None:
-    """Write records to CSV atomically (temp file in the same dir + os.replace)."""
+    """Write records to CSV atomically (temp file in the same dir + os.replace).
+
+    Rows of the existing file that fail validation are appended unchanged so the human
+    can fix them. Raises ApplicationsFileLocked if the file cannot be written (on
+    Windows, os.replace fails while Excel has it open).
+    """
     path = Path(path) if path is not None else paths.APPLICATIONS_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=FIELDS)
-            writer.writeheader()
-            for rec in records.values():
-                writer.writerow(
-                    {
-                        "job_id": rec.job_id,
-                        "company": rec.company,
-                        "title": rec.title,
-                        "url": rec.url,
-                        "status": rec.status.value,
-                        "score": "" if rec.score is None else rec.score,
-                        "updated": rec.updated.isoformat(),
-                        "notes": rec.notes,
-                    }
-                )
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+        bad_rows = _read_rows(path, warn=False)[1]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=FIELDS)
+                writer.writeheader()
+                for row in [_to_row(rec) for rec in records.values()] + bad_rows:
+                    writer.writerow({k: _escape_cell(row.get(k, "")) for k in FIELDS})
+            os.replace(tmp, path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+    except PermissionError as e:
+        raise ApplicationsFileLocked(
+            f"Could not write {path} (permission denied). "
+            f"If it is open in Excel, close {path.name} in Excel and retry."
+        ) from e
 
 
 def load_jobs(path: Path | None = None) -> list[Job]:
@@ -152,6 +253,26 @@ def set_status(
     return rec
 
 
+def mark_drafted(
+    records: dict[str, ApplicationRecord],
+    job_ids: Iterable[str],
+    today: date | None = None,
+) -> list[str]:
+    """Set `drafted` (in place) on records still `found`/`scored`; never downgrades.
+
+    Unknown ids are ignored. Returns the ids that changed.
+    """
+    today = today or date.today()
+    changed = []
+    for job_id in job_ids:
+        rec = records.get(job_id)
+        if rec is not None and rec.status in (ApplicationStatus.found, ApplicationStatus.scored):
+            rec.status = ApplicationStatus.drafted
+            rec.updated = today
+            changed.append(job_id)
+    return changed
+
+
 def _table(headers: list[str], rows: list[list[str]]) -> str:
     widths = [len(h) for h in headers]
     for row in rows:
@@ -208,8 +329,20 @@ def build_report(records: dict[str, ApplicationRecord], today: date, top_n: int 
 # ---------------------------------------------------------------- glue for the CLI
 
 
-def sync_from_files(today: date | None = None) -> dict[str, ApplicationRecord]:
-    """Load jobs/scores/applications from the default paths, sync, save, return records."""
-    records = sync(load_jobs(), load_scores(), load_applications(), today=today)
-    save_applications(records)
+def sync_from_files(
+    today: date | None = None,
+    drafted: Iterable[str] = (),
+    save: bool = True,
+) -> dict[str, ApplicationRecord]:
+    """Load jobs/scores/applications from the default paths, sync, mark the `drafted`
+    ids (see `mark_drafted`), and return the records.
+
+    The CSV is only rewritten when something actually changed, so `report` leaves a
+    file the human has open in Excel alone. save=False: the caller saves later.
+    """
+    before = load_applications()
+    records = sync(load_jobs(), load_scores(), before, today=today)
+    mark_drafted(records, drafted, today=today)
+    if save and records != before:
+        save_applications(records)
     return records

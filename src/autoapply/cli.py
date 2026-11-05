@@ -104,13 +104,17 @@ def status(
         choices = ", ".join(s.value for s in ApplicationStatus)
         typer.echo(f"Invalid status {new_status!r}. Choose one of: {choices}", err=True)
         raise typer.Exit(2)
-    records = track.sync_from_files()
+    records = track.sync_from_files(save=False)  # saved once below
     try:
         rec = track.set_status(records, job_id, parsed, notes=notes)
     except KeyError as e:
         typer.echo(e.args[0], err=True)
         raise typer.Exit(1)
-    track.save_applications(records)
+    try:
+        track.save_applications(records)
+    except track.ApplicationsFileLocked as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     typer.echo(f"{rec.job_id}: {rec.status.value} ({rec.company} - {rec.title})")
 
 
@@ -121,7 +125,11 @@ def report() -> None:
 
     from autoapply import track
 
-    records = track.sync_from_files()
+    try:
+        records = track.sync_from_files()
+    except track.ApplicationsFileLocked as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     typer.echo(track.build_report(records, date.today()), nl=False)
 
 
@@ -134,8 +142,18 @@ def tailor(
     force: bool = typer.Option(False, "--force", help="Regenerate even if output already exists."),
 ) -> None:
     """Write a tailored resume.md + cover_letter.md per job into out/ (milestone M4)."""
-    from autoapply import llm, paths
+    from autoapply import llm, paths, track
     from autoapply import tailor as t
+
+    def record_drafted(job_ids: list[str]) -> None:
+        """Mark tailored jobs `drafted` in applications.csv (never downgrades); one save."""
+        if not job_ids:
+            return
+        try:
+            track.sync_from_files(drafted=job_ids)
+        except track.ApplicationsFileLocked as e:
+            typer.echo(f"Error: tailored files are written, but the tracker was not updated. {e}", err=True)
+            raise typer.Exit(1)
 
     profile = load_profile()
     jobs = t.load_jobs(paths.JOBS_FILE)
@@ -150,13 +168,16 @@ def tailor(
         typer.echo(f"{len(todo)} job(s) scored >= {threshold}.")
 
     pending = []
+    drafted: list[str] = []  # already tailored earlier: backfill the tracker too
     for job in todo:
         dest = t.output_dir(job, paths.OUT_DIR)
         if t.is_tailored(dest) and not force:
             typer.echo(f"skip (exists): {dest}")
+            drafted.append(job.id)
         else:
             pending.append(job)
     if not pending:
+        record_drafted(drafted)
         typer.echo("Nothing to tailor.")
         return
 
@@ -172,9 +193,11 @@ def tailor(
         try:
             dest = t.tailor_job(job, profile, master, client, paths.OUT_DIR)
             typer.echo(f"wrote: {dest}")
+            drafted.append(job.id)
         except Exception as e:  # keep going; one bad job shouldn't stop the batch
             failed += 1
             typer.echo(f"failed: {job.id}: {e}", err=True)
+    record_drafted(drafted)
     if failed:
         raise typer.Exit(1)
 
