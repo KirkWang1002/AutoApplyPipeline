@@ -8,7 +8,7 @@ import yaml
 
 from autoapply.models import Companies, Profile
 
-CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+from autoapply.paths import CONFIG_DIR  # noqa: E402
 
 
 def _resolve(name: str, config_dir: Path) -> Path:
