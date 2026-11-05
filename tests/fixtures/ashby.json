@@ -1,0 +1,46 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "0f1e2d3c-0001",
+      "title": "Electrical Engineering Intern",
+      "jobUrl": "https://jobs.ashbyhq.com/sparkhw/0f1e2d3c-0001",
+      "location": "Durham, NC",
+      "isRemote": false,
+      "isListed": true,
+      "publishedAt": "2026-10-30T15:00:00.000+00:00",
+      "descriptionPlain": "Design power supplies."
+    },
+    {
+      "id": "0f1e2d3c-0002",
+      "title": "Staff Electrical Engineer",
+      "jobUrl": "https://jobs.ashbyhq.com/sparkhw/0f1e2d3c-0002",
+      "location": "Durham, NC",
+      "isRemote": false,
+      "isListed": true,
+      "publishedAt": "2026-11-01T15:00:00.000+00:00",
+      "descriptionPlain": "Own the power architecture."
+    },
+    {
+      "id": "0f1e2d3c-0003",
+      "title": "Hardware Engineer Intern",
+      "jobUrl": "https://jobs.ashbyhq.com/sparkhw/0f1e2d3c-0003",
+      "location": "United States",
+      "isRemote": true,
+      "isListed": true,
+      "publishedAt": null,
+      "descriptionPlain": "",
+      "descriptionHtml": "<p>Fully <em>remote</em> internship.</p>"
+    },
+    {
+      "id": "0f1e2d3c-0004",
+      "title": "Hardware Engineer Intern",
+      "jobUrl": "https://jobs.ashbyhq.com/sparkhw/0f1e2d3c-0004",
+      "location": "Durham, NC",
+      "isRemote": false,
+      "isListed": false,
+      "publishedAt": "2026-11-01T15:00:00.000+00:00",
+      "descriptionPlain": "Unlisted."
+    }
+  ]
+}
