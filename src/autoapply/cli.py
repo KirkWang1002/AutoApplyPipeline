@@ -22,9 +22,28 @@ def config() -> None:
 
 
 @app.command()
-def discover() -> None:
-    """Fetch new postings from configured job boards (milestone M2)."""
-    typer.echo("discover: not implemented yet, see docs/ROADMAP.md M2")
+def discover(
+    all_jobs: bool = typer.Option(False, "--all", help="Skip title/location/date filters."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print new jobs without saving them."),
+) -> None:
+    """Fetch new postings from configured job boards and append them to data/jobs.jsonl."""
+    import logging
+    from datetime import datetime, timezone
+
+    from autoapply import discover as disc
+
+    logging.basicConfig(level=logging.WARNING, format="warning: %(message)s")
+    path = disc.JOBS_FILE
+    with disc.make_client() as client:
+        jobs = disc.discover(
+            load_companies(), load_profile(), client, datetime.now(timezone.utc),
+            known=disc.load_jobs(path), apply_filters=not all_jobs,
+        )
+    if not dry_run:
+        jobs = disc.save_jobs(jobs, path)
+    for job in jobs:
+        typer.echo(f"{job.company:<16} {job.title[:60]:<60} {job.location[:30]:<30} {job.url}")
+    typer.echo(f"{len(jobs)} new job(s)" + (" (dry run, not saved)" if dry_run else f" saved to {path}"))
 
 
 if __name__ == "__main__":
