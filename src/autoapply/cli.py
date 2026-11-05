@@ -95,5 +95,59 @@ def report() -> None:
     typer.echo(track.build_report(records, date.today()), nl=False)
 
 
+@app.command()
+def tailor(
+    min_score: int = typer.Option(
+        None, "--min", min=1, max=5, help="Minimum score to tailor (default: profile.min_score_to_tailor)."
+    ),
+    job_id: str = typer.Option(None, "--job-id", help="Tailor only this job id (ignores scores)."),
+    force: bool = typer.Option(False, "--force", help="Regenerate even if output already exists."),
+) -> None:
+    """Write a tailored resume.md + cover_letter.md per job into out/ (milestone M4)."""
+    from autoapply import llm, paths
+    from autoapply import tailor as t
+
+    profile = load_profile()
+    jobs = t.load_jobs(paths.JOBS_FILE)
+    if job_id:
+        todo = [j for j in jobs if j.id == job_id][:1]
+        if not todo:
+            typer.echo(f"Job {job_id!r} not found in {paths.JOBS_FILE}", err=True)
+            raise typer.Exit(1)
+    else:
+        threshold = min_score if min_score is not None else profile.min_score_to_tailor
+        todo = t.select_jobs_to_tailor(jobs, t.load_scores(paths.SCORES_FILE), threshold)
+        typer.echo(f"{len(todo)} job(s) scored >= {threshold}.")
+
+    pending = []
+    for job in todo:
+        dest = t.output_dir(job, paths.OUT_DIR)
+        if t.is_tailored(dest) and not force:
+            typer.echo(f"skip (exists): {dest}")
+        else:
+            pending.append(job)
+    if not pending:
+        typer.echo("Nothing to tailor.")
+        return
+
+    try:
+        master = t.load_master_resume(paths.RESUME_DIR)
+        client = llm.get_client()
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    failed = 0
+    for job in pending:
+        try:
+            dest = t.tailor_job(job, profile, master, client, paths.OUT_DIR)
+            typer.echo(f"wrote: {dest}")
+        except Exception as e:  # keep going; one bad job shouldn't stop the batch
+            failed += 1
+            typer.echo(f"failed: {job.id}: {e}", err=True)
+    if failed:
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
