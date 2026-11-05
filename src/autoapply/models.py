@@ -82,8 +82,18 @@ class ApplicationRecord(BaseModel):
     notes: str = ""
 
 
+def board_display_name(board: str) -> str:
+    """Human-readable company name derived from an ATS board slug ("example-company" -> "Example Company")."""
+    return board.replace("-", " ").replace("_", " ").title()
+
+
 class CompanyBoard(BaseModel):
-    board: str
+    board: str  # ATS slug, used in API URLs and Job.id
+    name: str | None = None  # display name for cover letters etc.; derived from `board` if unset
+
+    @property
+    def display_name(self) -> str:
+        return (self.name or "").strip() or board_display_name(self.board)
 
 
 class Companies(BaseModel):

@@ -19,6 +19,7 @@ from autoapply.discover import (
     filter_jobs,
     html_to_text,
     load_jobs,
+    location_matches,
     parse_ashby,
     parse_greenhouse,
     parse_lever,
@@ -80,7 +81,7 @@ def test_parse_greenhouse():
     assert len(jobs) == 4
     j = jobs[0]
     assert j.id == "greenhouse:acme-robotics:1001"
-    assert j.source == "greenhouse" and j.company == "acme-robotics"
+    assert j.source == "greenhouse" and j.company == "Acme Robotics"  # display name, slug stays in id
     assert j.url == "https://boards.greenhouse.io/acme-robotics/jobs/1001"
     assert j.location == "Austin, TX" and not j.remote
     assert j.posted_at == datetime(2026, 11, 1, 13, 30, tzinfo=timezone.utc)
@@ -95,10 +96,50 @@ def test_parse_lever():
     assert [j.id for j in jobs][:2] == ["lever:widgetco:aaaa-1111", "lever:widgetco:aaaa-2222"]
     assert jobs[0].title == "Embedded Software Intern"
     assert jobs[0].url == "https://jobs.lever.co/widgetco/aaaa-1111"
-    assert jobs[0].location == "San Francisco, CA" and not jobs[0].remote
+    assert jobs[0].location == "San Francisco, CA; Austin, TX" and not jobs[0].remote  # + allLocations, deduped
     assert jobs[0].posted_at == datetime(2026, 11, 3, tzinfo=timezone.utc)
-    assert jobs[0].description == "Write firmware for tiny widgets."
+    assert jobs[0].description == (
+        "Write firmware for tiny widgets.\n\n"
+        "What you'll do\n- Write C for ARM Cortex-M parts\n- Bring up new boards\n\n"
+        "Requirements\n- Pursuing a B.S. in EE or CS\n- Comfort with an oscilloscope & logic analyzer\n\n"
+        "Widgetco is an equal opportunity employer."
+    )
+    assert jobs[0].company == "Widgetco"
+    assert jobs[1].location == "Anywhere"
     assert jobs[1].remote  # workplaceType == "remote"
+    assert jobs[2].description == "Make posters."  # no lists / additional
+
+
+def test_parse_lever_falls_back_to_html_and_tolerates_odd_lists():
+    payload = [{
+        "id": "x1", "text": "T", "hostedUrl": "https://jobs.lever.co/w/x1",
+        "categories": {"allLocations": ["Toronto, ON", "", None]},
+        "description": "<p>Intro <b>html</b></p>",
+        "lists": [{"text": "Bonus", "content": ""}, "garbage", {"content": "<li>only bullets</li>"}],
+        "additional": "<p>Closing html</p>",
+    }]
+    j = parse_lever(payload, "w")[0]
+    assert j.location == "Toronto, ON"
+    assert j.description == "Intro html\n\nBonus\n\n- only bullets\n\nClosing html"
+
+
+def test_parse_ashby_secondary_locations_both_shapes():
+    jobs = parse_ashby(fixture("ashby.json"), "sparkhw")
+    assert jobs[0].location == "Durham, NC; Raleigh, NC"  # object + duplicate string
+    assert jobs[2].location == "United States"  # empty secondaryLocations
+    payload = {"jobs": [{"id": "1", "title": "T", "jobUrl": "u", "location": "London",
+                         "secondaryLocations": ["Austin, TX", {"location": "Remote"}, {"address": {}}, 7]}]}
+    j = parse_ashby(payload, "x")[0]
+    assert j.location == "London; Austin, TX; Remote" and j.remote
+    assert filter_jobs([j], Target(locations=["TX"], posted_within_days=10_000), NOW) == [j]
+
+
+def test_company_display_name():
+    assert CompanyBoard(board="example-company").display_name == "Example Company"
+    assert CompanyBoard(board="spark_hw").display_name == "Spark Hw"
+    assert CompanyBoard(board="anthropic", name="Anthropic, PBC").display_name == "Anthropic, PBC"
+    assert CompanyBoard.model_validate({"board": "acme"}).name is None  # old configs still load
+    assert parse_greenhouse(fixture("greenhouse.json"), "acme", "ACME Corp")[0].company == "ACME Corp"
 
 
 def test_parse_ashby():
@@ -122,6 +163,7 @@ def test_parsers_tolerate_empty_and_malformed():
 def test_html_to_text():
     assert html_to_text("") == ""
     assert html_to_text("<p>a&nbsp;b</p><script>evil()</script><p>c</p>") == "a b\n\nc"
+    assert html_to_text("<p>Intro</p><ul><li>a</li><li>b</li></ul><p>End</p>") == "Intro\n\n- a\n- b\n\nEnd"
 
 
 # ---------------------------------------------------------------- filters
@@ -179,6 +221,24 @@ def test_filter_location_and_dates():
     assert len(filter_jobs([job(location="NC", posted_at=datetime(2026, 11, 4))], t, NOW.replace(tzinfo=None))) == 1
     # Remote not listed: remote flag alone is not enough
     assert filter_jobs([job(location="Anywhere", remote=True)], Target(locations=["TX"]), NOW) == []
+
+
+@pytest.mark.parametrize(
+    "location,targets,expected",
+    [
+        ("San Francisco, California", ["CA"], True),
+        ("San Francisco, CA", ["California"], True),
+        ("Raleigh, North Carolina", ["nc"], True),
+        ("Austin, TX", ["Texas"], True),
+        ("Portland, Oregon", ["OR"], True),
+        ("Remote or Hybrid", ["Oregon"], False),  # full name -> code only matches an upper-case code
+        ("Indianapolis", ["IN"], False),  # whole words only
+        ("Carolina Beach", ["NC"], False),  # "North Carolina" required, not just "Carolina"
+        ("New York, NY", ["CA", "TX"], False),
+    ],
+)
+def test_location_state_aliases(location, targets, expected):
+    assert location_matches(job(location=location), targets) is expected
 
 
 def test_empty_target_keeps_everything():
@@ -280,11 +340,24 @@ def test_cli_discover(tmp_path: Path, monkeypatch):
     assert dry.exit_code == 0, dry.output
     assert "11 new job(s) (dry run" in dry.output and not out.exists()
 
-    first = runner.invoke(app, ["discover", "--all"])
-    assert first.exit_code == 0, first.output
-    assert "11 new job(s) saved" in first.output
-    assert len(load_jobs(out)) == 11
+    # --all is preview-only even without --dry-run: unfiltered postings are never saved.
+    everything = runner.invoke(app, ["discover", "--all"])
+    assert everything.exit_code == 0, everything.output
+    assert "11 new job(s) (dry run, not saved)" in everything.output
+    assert "--all is preview-only" in everything.output and not out.exists()
 
-    second = runner.invoke(app, ["discover", "--all"])
+    # Without --all, only filtered jobs are saved. The CLI uses the real clock, so only assert
+    # date-independent facts: the remote posting with no date always passes, the excluded ones never do.
+    first = runner.invoke(app, ["discover"])
+    assert first.exit_code == 0, first.output
+    saved = load_jobs(out)
+    assert f"{len(saved)} new job(s) saved" in first.output
+    ids = {j.id for j in saved}
+    assert "ashby:example-company:0f1e2d3c-0003" in ids
+    assert not ids & {"lever:example-company:aaaa-3333", "ashby:example-company:0f1e2d3c-0002"}
+    names = {j.id.split(":")[0]: j.company for j in saved}
+    assert names["ashby"] == "Example Company"  # derived from the slug (example config has no name)
+
+    second = runner.invoke(app, ["discover"])
     assert "0 new job(s)" in second.output
-    assert len(load_jobs(out)) == 11
+    assert len(load_jobs(out)) == len(saved)

@@ -23,7 +23,7 @@ from typing import Any
 
 import httpx
 
-from autoapply.models import Companies, Job, Profile, Target
+from autoapply.models import Companies, Job, Profile, Target, board_display_name
 from autoapply import paths, storage
 
 log = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ class _TextExtractor(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag in self._SKIP:
             self._skip_depth = max(0, self._skip_depth - 1)
-        elif tag in self._BLOCK:
+        elif tag in self._BLOCK and tag != "li":  # the next "<li>" adds its own newline
             self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
@@ -108,11 +108,57 @@ def _looks_remote(location: str) -> bool:
     return bool(re.search(r"\bremote\b", location or "", re.IGNORECASE))
 
 
+def _location_strings(value: Any) -> list[str]:
+    """Pull location names out of a string, a ``{"location": ...}``/``{"name": ...}`` object, or a list of those."""
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, dict):
+        return _location_strings(value.get("location") or value.get("name") or value.get("locationName"))
+    if isinstance(value, (list, tuple)):
+        return [s for v in value for s in _location_strings(v)]
+    return []
+
+
+def _join_locations(*values: Any) -> str:
+    """Join every location found in ``values`` with "; ", dropping case-insensitive duplicates."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for loc in _location_strings(list(values)):
+        if loc.lower() not in seen:
+            seen.add(loc.lower())
+            out.append(loc)
+    return "; ".join(out)
+
+
+def _lever_description(item: dict) -> str:
+    """Lever splits a posting into intro, ``lists`` (headed bullet sections) and closing text."""
+    parts: list[str] = []
+    intro = item.get("descriptionPlain") or html_to_text(item.get("description") or "")
+    if intro.strip():
+        parts.append(intro.strip())
+    for section in item.get("lists") or []:
+        if not isinstance(section, dict):
+            continue
+        heading = (section.get("text") or "").strip()
+        body = html_to_text(section.get("content") or "")
+        block = "\n".join(p for p in (heading, body) if p)
+        if block:
+            parts.append(block)
+    closing = item.get("additionalPlain") or html_to_text(item.get("additional") or "")
+    if closing.strip():
+        parts.append(closing.strip())
+    return "\n\n".join(parts)
+
+
 # --------------------------------------------------------------------------- parsers (pure)
 
 
-def parse_greenhouse(payload: dict, board: str) -> list[Job]:
-    """Parse a Greenhouse ``/v1/boards/{board}/jobs?content=true`` response."""
+def parse_greenhouse(payload: dict, board: str, company: str | None = None) -> list[Job]:
+    """Parse a Greenhouse ``/v1/boards/{board}/jobs?content=true`` response.
+
+    ``company`` is the display name for ``Job.company``; it defaults to one derived from ``board``.
+    """
+    company = company or board_display_name(board)
     jobs: list[Job] = []
     for item in (payload or {}).get("jobs") or []:
         if not item.get("id") or not item.get("title") or not item.get("absolute_url"):
@@ -123,7 +169,7 @@ def parse_greenhouse(payload: dict, board: str) -> list[Job]:
             Job(
                 id=f"greenhouse:{board}:{item['id']}",
                 source="greenhouse",
-                company=board,
+                company=company,
                 title=item["title"].strip(),
                 url=item["absolute_url"],
                 location=location,
@@ -135,20 +181,26 @@ def parse_greenhouse(payload: dict, board: str) -> list[Job]:
     return jobs
 
 
-def parse_lever(payload: list, board: str) -> list[Job]:
-    """Parse a Lever ``/v0/postings/{board}?mode=json`` response (a JSON list)."""
+def parse_lever(payload: list, board: str, company: str | None = None) -> list[Job]:
+    """Parse a Lever ``/v0/postings/{board}?mode=json`` response (a JSON list).
+
+    The description joins ``descriptionPlain``, each of ``lists`` (heading + bullets) and
+    ``additionalPlain``; the location joins ``categories.location`` and ``categories.allLocations``.
+    """
+    company = company or board_display_name(board)
     jobs: list[Job] = []
     for item in payload or []:
         if not item.get("id") or not item.get("text") or not item.get("hostedUrl"):
             continue
-        location = ((item.get("categories") or {}).get("location") or "").strip()
+        categories = item.get("categories") or {}
+        location = _join_locations(categories.get("location"), categories.get("allLocations"))
         workplace = (item.get("workplaceType") or "").lower()
-        description = item.get("descriptionPlain") or html_to_text(item.get("description") or "")
+        description = _lever_description(item)
         jobs.append(
             Job(
                 id=f"lever:{board}:{item['id']}",
                 source="lever",
-                company=board,
+                company=company,
                 title=item["text"].strip(),
                 url=item["hostedUrl"],
                 location=location,
@@ -160,21 +212,25 @@ def parse_lever(payload: list, board: str) -> list[Job]:
     return jobs
 
 
-def parse_ashby(payload: dict, board: str) -> list[Job]:
-    """Parse an Ashby ``/posting-api/job-board/{board}`` response. Unlisted postings are skipped."""
+def parse_ashby(payload: dict, board: str, company: str | None = None) -> list[Job]:
+    """Parse an Ashby ``/posting-api/job-board/{board}`` response. Unlisted postings are skipped.
+
+    The location joins ``location`` and ``secondaryLocations`` (objects or plain strings).
+    """
+    company = company or board_display_name(board)
     jobs: list[Job] = []
     for item in (payload or {}).get("jobs") or []:
         if not item.get("id") or not item.get("title") or not item.get("jobUrl"):
             continue
         if item.get("isListed") is False:
             continue
-        location = (item.get("location") or "").strip()
+        location = _join_locations(item.get("location"), item.get("secondaryLocations"))
         description = item.get("descriptionPlain") or html_to_text(item.get("descriptionHtml") or "")
         jobs.append(
             Job(
                 id=f"ashby:{board}:{item['id']}",
                 source="ashby",
-                company=board,
+                company=company,
                 title=item["title"].strip(),
                 url=item["jobUrl"],
                 location=location,
@@ -194,30 +250,37 @@ def make_client() -> httpx.Client:
     return httpx.Client(timeout=20.0, follow_redirects=True, headers={"User-Agent": USER_AGENT})
 
 
-def _fetch(client: httpx.Client, source: str, board: str, url: str, parse: Callable[[Any, str], list[Job]]) -> list[Job]:
+def _fetch(
+    client: httpx.Client,
+    source: str,
+    board: str,
+    url: str,
+    parse: Callable[[Any, str, str | None], list[Job]],
+    company: str | None = None,
+) -> list[Job]:
     """GET ``url`` and parse it. Any HTTP/network/JSON error logs a warning and returns []."""
     try:
         resp = client.get(url)
         resp.raise_for_status()
-        return parse(resp.json(), board)
+        return parse(resp.json(), board, company)
     except (httpx.HTTPError, ValueError, AttributeError, TypeError) as exc:
         log.warning("skipping %s board %r: %s", source, board, exc)
         return []
 
 
-def fetch_greenhouse(client: httpx.Client, board: str) -> list[Job]:
-    return _fetch(client, "greenhouse", board, GREENHOUSE_URL.format(board=board), parse_greenhouse)
+def fetch_greenhouse(client: httpx.Client, board: str, company: str | None = None) -> list[Job]:
+    return _fetch(client, "greenhouse", board, GREENHOUSE_URL.format(board=board), parse_greenhouse, company)
 
 
-def fetch_lever(client: httpx.Client, board: str) -> list[Job]:
-    return _fetch(client, "lever", board, LEVER_URL.format(board=board), parse_lever)
+def fetch_lever(client: httpx.Client, board: str, company: str | None = None) -> list[Job]:
+    return _fetch(client, "lever", board, LEVER_URL.format(board=board), parse_lever, company)
 
 
-def fetch_ashby(client: httpx.Client, board: str) -> list[Job]:
-    return _fetch(client, "ashby", board, ASHBY_URL.format(board=board), parse_ashby)
+def fetch_ashby(client: httpx.Client, board: str, company: str | None = None) -> list[Job]:
+    return _fetch(client, "ashby", board, ASHBY_URL.format(board=board), parse_ashby, company)
 
 
-FETCHERS: dict[str, Callable[[httpx.Client, str], list[Job]]] = {
+FETCHERS: dict[str, Callable[[httpx.Client, str, str | None], list[Job]]] = {
     "greenhouse": fetch_greenhouse,
     "lever": fetch_lever,
     "ashby": fetch_ashby,
@@ -228,7 +291,7 @@ def fetch_all(companies: Companies, client: httpx.Client) -> list[Job]:
     jobs: list[Job] = []
     for source, fetch in FETCHERS.items():
         for company in getattr(companies, source):
-            jobs.extend(fetch(client, company.board))
+            jobs.extend(fetch(client, company.board, company.display_name))
     return jobs
 
 
@@ -270,9 +333,45 @@ def _contains_word(text: str, word: str) -> bool:
     return bool(re.search(rf"(?<!\w){re.escape(word.strip())}(?!\w)", text or "", re.IGNORECASE))
 
 
+US_STATES: dict[str, str] = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California",
+    "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia",
+    "HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa",
+    "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+    "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri",
+    "MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey",
+    "NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio",
+    "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+    "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont",
+    "VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+    "DC": "District of Columbia",
+}
+_STATE_CODES: dict[str, str] = {name.lower(): code for code, name in US_STATES.items()}
+
+
+def _location_hit(text: str, loc: str) -> bool:
+    """Whole-word match of ``loc`` in ``text``, also trying the US state alias of ``loc``.
+
+    A 2-letter state code also matches the full state name ("CA" -> "California", any case).
+    A full state name also matches its code, but only written in upper case ("Oregon" -> "OR"),
+    so a target like "Oregon" does not match the word "or" in "Remote or Hybrid".
+    """
+    loc = loc.strip()
+    if not loc:
+        return False
+    if _contains_word(text, loc):
+        return True
+    name = US_STATES.get(loc.upper()) if len(loc) == 2 else None
+    if name and _contains_word(text, name):
+        return True
+    code = _STATE_CODES.get(re.sub(r"\s+", " ", loc.lower()))
+    return bool(code and re.search(rf"(?<!\w){code}(?!\w)", text or ""))
+
+
 def location_matches(job: Job, locations: list[str]) -> bool:
     """True if the job's location contains any target location as a whole word (case-insensitive).
 
+    US states match by code or full name in either direction (see :func:`_location_hit`).
     "Remote" in ``locations`` also accepts any job flagged ``remote``. Jobs with no location
     text are kept (unknown, let the human decide). An empty ``locations`` list accepts all.
     """
@@ -281,7 +380,7 @@ def location_matches(job: Job, locations: list[str]) -> bool:
     for loc in locations:
         if loc.strip().lower() == "remote" and job.remote:
             return True
-        if _contains_word(job.location, loc):
+        if _location_hit(job.location, loc):
             return True
     return False
 

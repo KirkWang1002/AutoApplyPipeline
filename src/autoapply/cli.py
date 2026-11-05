@@ -23,10 +23,15 @@ def config() -> None:
 
 @app.command()
 def discover(
-    all_jobs: bool = typer.Option(False, "--all", help="Skip title/location/date filters."),
+    all_jobs: bool = typer.Option(
+        False, "--all", help="Preview every posting, skipping title/location/date filters. Implies --dry-run."
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print new jobs without saving them."),
 ) -> None:
-    """Fetch new postings from configured job boards and append them to data/jobs.jsonl."""
+    """Fetch new postings from configured job boards and append them to data/jobs.jsonl.
+
+    ``--all`` is preview-only: saving unfiltered postings would make ``score`` spend tokens on all of them.
+    """
     import logging
     from datetime import datetime, timezone
 
@@ -36,6 +41,8 @@ def discover(
     from autoapply import paths
 
     path = paths.JOBS_FILE
+    if all_jobs:
+        dry_run = True  # never persist unfiltered postings; `score` would pay to score every one
     with disc.make_client() as client:
         jobs = disc.discover(
             load_companies(), load_profile(), client, datetime.now(timezone.utc),
@@ -46,6 +53,8 @@ def discover(
     for job in jobs:
         typer.echo(f"{job.company:<16} {job.title[:60]:<60} {job.location[:30]:<30} {job.url}")
     typer.echo(f"{len(jobs)} new job(s)" + (" (dry run, not saved)" if dry_run else f" saved to {path}"))
+    if all_jobs:
+        typer.echo("note: --all is preview-only; nothing was saved. Run without --all to save filtered jobs.")
 
 
 @app.command()
