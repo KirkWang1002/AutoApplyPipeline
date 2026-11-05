@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-prefill = ["playwright"]
+prefill = ["playwright", "markdown"]
 dev = ["pytest"]
 
 [project.scripts]

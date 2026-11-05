@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ashby-style client-rendered form (fake)</title></head>
+<body>
+<div id="root"></div>
+<script>
+window.__submitted = false;
+window.__inputEvents = 0;
+// Render after a delay, like a client-side app.
+setTimeout(() => {
+  document.getElementById('root').innerHTML = `
+    <form onsubmit="window.__submitted = true; return false;">
+      <label for="_systemfield_name">Name</label><input id="_systemfield_name" name="_systemfield_name">
+      <label for="_systemfield_email">Email</label><input id="_systemfield_email" name="_systemfield_email" type="email">
+      <label for="_systemfield_resume">Resume</label><input id="_systemfield_resume" type="file">
+      <label for="q1">Where are you currently located?</label><input id="q1" name="q1">
+      <label for="q2">Why do you want to work here?</label><textarea id="q2"></textarea>
+      <button type="submit">Submit Application</button>
+    </form>`;
+  document.querySelectorAll('input').forEach((el) => el.addEventListener('input', () => window.__inputEvents++));
+}, 300);
+</script>
+</body></html>
