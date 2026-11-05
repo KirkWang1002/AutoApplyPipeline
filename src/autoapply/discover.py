@@ -24,7 +24,7 @@ from typing import Any
 import httpx
 
 from autoapply.models import Companies, Job, Profile, Target
-from autoapply.paths import JOBS_FILE
+from autoapply import paths, storage
 
 log = logging.getLogger(__name__)
 
@@ -335,19 +335,14 @@ def dedupe(jobs: Iterable[Job]) -> list[Job]:
 # --------------------------------------------------------------------------- storage
 
 
-def load_jobs(path: Path = JOBS_FILE) -> list[Job]:
-    """Read jobs from a JSONL file; a missing file means no jobs."""
-    if not path.exists():
-        return []
-    jobs: list[Job] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            jobs.append(Job.model_validate_json(line))
-    return jobs
+def load_jobs(path: Path | None = None) -> list[Job]:
+    """Read jobs from a JSONL file; a missing file means no jobs, bad lines are skipped."""
+    return storage.load_jobs(path)
 
 
-def save_jobs(jobs: Iterable[Job], path: Path = JOBS_FILE) -> list[Job]:
+def save_jobs(jobs: Iterable[Job], path: Path | None = None) -> list[Job]:
     """Append jobs whose id is not already in ``path``. Returns the jobs actually written."""
+    path = Path(path) if path is not None else paths.JOBS_FILE
     known = {j.id for j in load_jobs(path)}
     new: list[Job] = []
     for job in jobs:

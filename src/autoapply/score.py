@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from autoapply import llm
 from autoapply.models import Job, Profile, ScoreResult
-from autoapply.paths import SCORES_FILE
+from autoapply import paths, storage
 
 MAX_DESCRIPTION_CHARS = 8000
 
@@ -148,37 +148,21 @@ def score_job(job: Job, profile: Profile, client: Any) -> ScoreResult:
 # --- cache -----------------------------------------------------------------
 
 
-def load_cache(path: Path = SCORES_FILE) -> dict[str, ScoreResult]:
+def load_cache(path: Path | None = None) -> dict[str, ScoreResult]:
     """Read cached scores keyed by job id. Later lines win; malformed lines are skipped."""
-    path = Path(path)
-    cache: dict[str, ScoreResult] = {}
-    if not path.exists():
-        return cache
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if not line.strip():
-            continue
-        try:
-            result = ScoreResult.model_validate_json(line)
-        except ValidationError:
-            print(f"warning: skipping bad cache line {path}:{lineno}", file=sys.stderr)
-            continue
-        cache[result.job_id] = result
-    return cache
+    return storage.load_scores(path)
 
 
-def append_cache(result: ScoreResult, path: Path = SCORES_FILE) -> None:
-    path = Path(path)
+def append_cache(result: ScoreResult, path: Path | None = None) -> None:
+    path = Path(path) if path is not None else paths.SCORES_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(result.model_dump_json() + "\n")
 
 
-def read_jobs(path: Path) -> list[Job]:
-    """Read jobs JSONL (one Job.model_dump_json per line). Missing file -> []."""
-    path = Path(path)
-    if not path.exists():
-        return []
-    return [Job.model_validate_json(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+def read_jobs(path: Path | None = None) -> list[Job]:
+    """Read jobs JSONL. Missing file -> []; bad lines skipped."""
+    return storage.load_jobs(path)
 
 
 def uncached(jobs: Iterable[Job], cache: dict[str, ScoreResult]) -> list[Job]:
@@ -186,7 +170,7 @@ def uncached(jobs: Iterable[Job], cache: dict[str, ScoreResult]) -> list[Job]:
 
 
 def score_jobs(
-    jobs: Iterable[Job], profile: Profile, client: Any, cache_path: Path = SCORES_FILE
+    jobs: Iterable[Job], profile: Profile, client: Any, cache_path: Path | None = None
 ) -> list[ScoreResult]:
     """Score each job, reusing cached results. One failing job is logged and skipped."""
     cache = load_cache(cache_path)

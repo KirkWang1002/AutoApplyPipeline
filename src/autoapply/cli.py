@@ -33,7 +33,9 @@ def discover(
     from autoapply import discover as disc
 
     logging.basicConfig(level=logging.WARNING, format="warning: %(message)s")
-    path = disc.JOBS_FILE
+    from autoapply import paths
+
+    path = paths.JOBS_FILE
     with disc.make_client() as client:
         jobs = disc.discover(
             load_companies(), load_profile(), client, datetime.now(timezone.utc),

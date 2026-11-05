@@ -7,6 +7,7 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
+from autoapply import paths
 from autoapply import discover as disc
 from autoapply.cli import app
 from autoapply.discover import (
@@ -271,7 +272,7 @@ def test_discover_end_to_end_skips_failing_board_and_known_jobs():
 
 def test_cli_discover(tmp_path: Path, monkeypatch):
     out = tmp_path / "data" / "jobs.jsonl"
-    monkeypatch.setattr(disc, "JOBS_FILE", out)
+    monkeypatch.setattr(paths, "JOBS_FILE", out)
     monkeypatch.setattr(disc, "make_client", lambda: mock_client(all_fixture_routes()))
     runner = CliRunner()
 

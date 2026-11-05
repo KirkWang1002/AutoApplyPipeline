@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from autoapply import storage
 from autoapply.llm import complete_text
 from autoapply.models import Job, Profile, ScoreResult
 
@@ -64,21 +65,14 @@ def load_master_resume(resume_dir: Path) -> str:
     )
 
 
-def _read_jsonl(path: Path) -> list[str]:
-    path = Path(path)
-    if not path.exists():
-        return []
-    return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
 def load_jobs(path: Path) -> list[Job]:
     """Read JOBS_FILE (JSONL of Job). Missing file -> []."""
-    return [Job.model_validate_json(line) for line in _read_jsonl(path)]
+    return storage.load_jobs(path)
 
 
 def load_scores(path: Path) -> list[ScoreResult]:
     """Read SCORES_FILE (JSONL of ScoreResult). Missing file -> []."""
-    return [ScoreResult.model_validate_json(line) for line in _read_jsonl(path)]
+    return list(storage.load_scores(path).values())
 
 
 def select_jobs_to_tailor(

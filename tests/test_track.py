@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from autoapply import paths
 from autoapply import track
 from autoapply.cli import app
 from autoapply.models import ApplicationRecord, ApplicationStatus as S, Job, ScoreResult
@@ -170,9 +171,9 @@ def files(tmp_path: Path, monkeypatch):
     jobs_f.parent.mkdir(parents=True)
     jobs_f.write_text("".join(job(n).model_dump_json() + "\n" for n in (1, 2)))
     scores_f.write_text(ScoreResult(job_id=job(2).id, score=5).model_dump_json() + "\n")
-    monkeypatch.setattr(track, "JOBS_FILE", jobs_f)
-    monkeypatch.setattr(track, "SCORES_FILE", scores_f)
-    monkeypatch.setattr(track, "APPLICATIONS_FILE", apps_f)
+    monkeypatch.setattr(paths, "JOBS_FILE", jobs_f)
+    monkeypatch.setattr(paths, "SCORES_FILE", scores_f)
+    monkeypatch.setattr(paths, "APPLICATIONS_FILE", apps_f)
     return apps_f
 
 

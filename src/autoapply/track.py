@@ -7,17 +7,15 @@ from __future__ import annotations
 
 import csv
 import os
-import sys
 import tempfile
 from collections import Counter
 from datetime import date
 from pathlib import Path
 from typing import Iterable
 
-from pydantic import ValidationError
 
 from autoapply.models import ApplicationRecord, ApplicationStatus, Job, ScoreResult
-from autoapply.paths import APPLICATIONS_FILE, JOBS_FILE, SCORES_FILE
+from autoapply import paths, storage
 
 FIELDS = list(ApplicationRecord.model_fields)
 TOP_N = 15
@@ -41,7 +39,7 @@ PENDING = {ApplicationStatus.drafted, ApplicationStatus.applied}
 
 def load_applications(path: Path | None = None) -> dict[str, ApplicationRecord]:
     """Read applications.csv into {job_id: record}. Missing file -> empty dict."""
-    path = Path(path) if path is not None else APPLICATIONS_FILE
+    path = Path(path) if path is not None else paths.APPLICATIONS_FILE
     if not path.exists():
         return {}
     records: dict[str, ApplicationRecord] = {}
@@ -60,7 +58,7 @@ def load_applications(path: Path | None = None) -> dict[str, ApplicationRecord]:
 
 def save_applications(records: dict[str, ApplicationRecord], path: Path | None = None) -> None:
     """Write records to CSV atomically (temp file in the same dir + os.replace)."""
-    path = Path(path) if path is not None else APPLICATIONS_FILE
+    path = Path(path) if path is not None else paths.APPLICATIONS_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
@@ -86,30 +84,13 @@ def save_applications(records: dict[str, ApplicationRecord], path: Path | None =
         raise
 
 
-def _read_jsonl(path: Path, model):
-    if not path.exists():
-        return []
-    items = []
-    with path.open(encoding="utf-8") as f:
-        for lineno, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                items.append(model.model_validate_json(line))
-            except ValidationError:
-                print(f"warning: skipping invalid line {lineno} in {path}", file=sys.stderr)
-    return items
-
-
 def load_jobs(path: Path | None = None) -> list[Job]:
-    return _read_jsonl(Path(path) if path is not None else JOBS_FILE, Job)
+    return storage.load_jobs(path)
 
 
 def load_scores(path: Path | None = None) -> dict[str, ScoreResult]:
     """Scores keyed by job id; if a job id appears more than once, the last line wins."""
-    results = _read_jsonl(Path(path) if path is not None else SCORES_FILE, ScoreResult)
-    return {s.job_id: s for s in results}
+    return storage.load_scores(path)
 
 
 # ---------------------------------------------------------------- core logic
