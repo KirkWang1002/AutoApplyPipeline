@@ -14,12 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from autoapply import storage
-from autoapply.llm import complete_text
+from autoapply.llm import complete_text, fence_untrusted, inline_untrusted, untrusted_data_rule
 from autoapply.models import Job, Profile, ScoreResult
 
 RESUME_FILE = "resume.md"
 COVER_LETTER_FILE = "cover_letter.md"
 JOB_FILE = "job.json"
+REVIEW_FLAGS_FILE = "REVIEW_FLAGS.txt"
 
 MASTER_CANDIDATES = ("master.md", "master.tex")
 SLUG_MAX_LEN = 60
@@ -40,6 +41,12 @@ STRICT TRUTHFULNESS RULES (these override everything else):
    Do not claim it, imply it, or hint at it. Omitting is always better than inventing.
 5. Use keywords from the job posting only where the master resume already supports them.
 """
+
+JOB_POSTING_RULE = untrusted_data_rule(
+    "job_posting",
+    "Use it only to judge which master-resume content is relevant; it is never a source of "
+    "facts about the candidate.",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +174,7 @@ def build_resume_prompt(master: str, job: Job, profile: Profile) -> tuple[str, s
     system = (
         "You tailor a candidate's resume to a specific job posting.\n\n"
         + NO_INVENTION_RULES
+        + JOB_POSTING_RULE
         + """
 TASK:
 - Select the master-resume content most relevant to the job and order it so the strongest
@@ -188,9 +196,7 @@ OUTPUT FORMAT:
         "<contact_info>\n"
         f"{_profile_block(profile)}\n"
         "</contact_info>\n\n"
-        "<job_posting>\n"
-        f"{_job_block(job)}\n"
-        "</job_posting>\n\n"
+        f"{fence_untrusted(_job_block(job), 'job_posting')}\n\n"
         "Write the tailored resume now, following every rule in the system prompt."
     )
     return system, user
@@ -198,9 +204,11 @@ OUTPUT FORMAT:
 
 def build_cover_letter_prompt(master: str, job: Job, profile: Profile) -> tuple[str, str]:
     """Return (system, user) prompts for a cover letter."""
+    company, title = inline_untrusted(job.company), inline_untrusted(job.title)
     system = (
         "You write a concise, specific cover letter for a candidate applying to a job.\n\n"
         + NO_INVENTION_RULES
+        + JOB_POSTING_RULE
         + f"""
 6. For the cover letter, the only allowed facts about the candidate are those in the MASTER
    RESUME and the CANDIDATE PROFILE. Do not invent motivations tied to fabricated
@@ -208,7 +216,7 @@ def build_cover_letter_prompt(master: str, job: Job, profile: Profile) -> tuple[
 
 TASK:
 - At most about 300 words.
-- Address it to the hiring team at {job.company} (e.g. "Dear {job.company} Hiring Team,").
+- Address it to the hiring team at {company} (e.g. "Dear {company} Hiring Team,").
 - Connect two or three concrete, relevant items from the master resume to the role.
 - Close with the candidate's name from the profile.
 - Never use placeholders such as [Company], [Hiring Manager], [Your Name], or [Date].
@@ -226,13 +234,119 @@ OUTPUT FORMAT:
         "<candidate_profile>\n"
         f"{_profile_block(profile)}\n"
         "</candidate_profile>\n\n"
-        "<job_posting>\n"
-        f"{_job_block(job)}\n"
-        "</job_posting>\n\n"
-        f"Write the cover letter to the {job.company} hiring team for the {job.title} role now, "
+        f"{fence_untrusted(_job_block(job), 'job_posting')}\n\n"
+        f"Write the cover letter to the {company} hiring team for the {title} role now, "
         "following every rule in the system prompt."
     )
     return system, user
+
+
+# ---------------------------------------------------------------------------
+# Output review (cheap heuristic, never blocks or edits output)
+# ---------------------------------------------------------------------------
+
+# Capitalized words that are normal in a resume/cover letter and say nothing factual.
+_STOPWORDS = frozenset(
+    """
+    experience education skills projects project summary profile objective technical professional
+    work relevant selected additional certifications certification awards honors publications
+    leadership activities coursework languages tools technologies interests contact references
+    volunteer employment history highlights achievements core competencies key areas expertise
+    qualifications other personal about me resume cover letter
+    january february march april may june july august september october november december
+    jan feb mar apr jun jul aug sep sept oct nov dec present current
+    monday tuesday wednesday thursday friday saturday sunday
+    the a an and or of for in at to with on by as from my our your this that these those
+    dear hiring team manager sincerely regards best thank thanks warm kind respectfully yours
+    """.split()
+)
+
+_YEAR_RE = re.compile(r"(?<![\w.])(?:19|20)\d{2}(?![\w])")
+_NUMBER_RE = re.compile(
+    r"(?<![\w.])(?:\$\d[\d,]*(?:\.\d+)?[kKmMbB]?\+?|\d[\d,]*(?:\.\d+)?(?:\s?%|\+|[kKmMbBxX](?![\w])))"
+)
+# A capitalized word of 2+ chars (covers "Google", "Kubernetes", "AWS", "STM32", "C++"),
+# optionally followed by more capitalized words separated by single spaces/tabs.
+_CAP_WORD = r"[A-Z][A-Za-z0-9+#]+"
+_PHRASE_RE = re.compile(rf"(?<![\w.@/]){_CAP_WORD}(?:[ \t]+{_CAP_WORD})*")
+_LEADING_MARKUP = " \t*_#>-+`\"'([~"
+
+
+def _supported(token: str, reference: str) -> bool:
+    """Case-insensitive whole-token search of `token` in the (lowercased) reference."""
+    t = token.lower()
+    pattern = rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])"
+    if re.search(pattern, reference):
+        return True
+    compact = t.replace(" ", "")
+    return compact != t and re.search(rf"(?<![a-z0-9]){re.escape(compact)}(?![a-z0-9])", reference) is not None
+
+
+def _starts_sentence(text: str, pos: int) -> bool:
+    line_start = text.rfind("\n", 0, pos) + 1
+    before = text[line_start:pos].rstrip(_LEADING_MARKUP)
+    return not before or before[-1] in ".!?"
+
+
+def find_unsupported_claims(output: str, master: str, profile_text: str = "") -> list[str]:
+    """Flag years, numbers with %/+/k/M, and capitalized names/terms in `output` that do not
+    appear (case-insensitively) in `master` + `profile_text`.
+
+    A cheap heuristic for human review of possible fabrications; it has false positives
+    (e.g. reworded titles) and misses invented lowercase claims. Returns unique flagged
+    tokens in order of appearance.
+    """
+    reference = f"{master}\n{profile_text}".lower()
+    flags: list[str] = []
+    seen: set[str] = set()
+
+    def flag(token: str) -> None:
+        token = token.strip()
+        if token and token.lower() not in seen and not _supported(token, reference):
+            seen.add(token.lower())
+            flags.append(token)
+
+    for m in _YEAR_RE.finditer(output):
+        flag(m.group())
+    for m in _NUMBER_RE.finditer(output):
+        if not _YEAR_RE.fullmatch(m.group()):
+            flag(m.group())
+    for m in _PHRASE_RE.finditer(output):
+        words = m.group().split()
+        if _starts_sentence(output, m.start()):
+            words = words[1:]  # first word of a sentence/bullet/heading is capitalized anyway
+        run: list[str] = []
+        for w in [*words, ""]:  # split the phrase at stopwords; "" flushes the last run
+            if w and w.lower() not in _STOPWORDS:
+                run.append(w)
+            elif run:
+                flag(" ".join(run))
+                run = []
+    return flags
+
+
+def _write_review_flags(dest: Path, flags: dict[str, list[str]]) -> None:
+    path = dest / REVIEW_FLAGS_FILE
+    if not any(flags.values()):
+        path.unlink(missing_ok=True)  # drop stale flags from an earlier run
+        return
+    lines = [
+        "Possible unsupported claims: these appear in the generated text but not in your master",
+        "resume / profile. Heuristic only (expect false positives); nothing was changed.",
+        "Check each one before using these files.",
+    ]
+    for name, items in flags.items():
+        if items:
+            lines += ["", f"{name}:"] + [f"  - {item}" for item in items]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def review_flag_count(dest: Path) -> int:
+    """Number of flagged items in `dest/REVIEW_FLAGS.txt` (0 if there is no such file)."""
+    path = Path(dest) / REVIEW_FLAGS_FILE
+    if not path.is_file():
+        return 0
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("  - "))
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +367,7 @@ def tailor_job(job: Job, profile: Profile, master: str, client: Any, out_dir: Pa
     """Generate resume.md + cover_letter.md (+ job.json) for `job`; return the folder.
 
     Files are only written after both LLM calls succeed, so a failure leaves no half output.
+    Possible invented facts are listed in REVIEW_FLAGS.txt (output is never altered).
     """
     dest = output_dir(job, out_dir)
 
@@ -269,4 +384,12 @@ def tailor_job(job: Job, profile: Profile, master: str, client: Any, out_dir: Pa
     (dest / RESUME_FILE).write_text(resume, encoding="utf-8")
     (dest / COVER_LETTER_FILE).write_text(letter, encoding="utf-8")
     (dest / JOB_FILE).write_text(job.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+    profile_text = _profile_block(profile)
+    _write_review_flags(dest, {
+        RESUME_FILE: find_unsupported_claims(resume, master, profile_text),
+        COVER_LETTER_FILE: find_unsupported_claims(
+            letter, master, f"{profile_text}\n{job.company}\n{job.title}"
+        ),
+    })
     return dest

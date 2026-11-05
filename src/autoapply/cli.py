@@ -71,9 +71,20 @@ def score(
         raise typer.Exit(0)
     profile = load_profile()
     todo = scoring.uncached(jobs, scoring.load_cache(paths.SCORES_FILE))
-    client = llm.get_client() if todo else None
+    try:
+        client = llm.get_client() if todo else None
+    except RuntimeError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
     typer.echo(f"{len(jobs)} jobs, {len(jobs) - len(todo)} cached, scoring {len(todo)}...", err=True)
-    results = scoring.score_jobs(jobs, profile, client, paths.SCORES_FILE)
+    try:
+        results = scoring.score_jobs(jobs, profile, client, paths.SCORES_FILE)
+    except Exception as e:
+        if not llm.is_auth_error(e):
+            raise
+        typer.echo(f"Error: Anthropic rejected the API key ({type(e).__name__}). "
+                   "Check ANTHROPIC_API_KEY in .env.", err=True)
+        raise typer.Exit(1)
 
     by_id = {j.id: j for j in jobs}
     hits = [r for r in results if r.score >= min_score]
@@ -192,6 +203,8 @@ def tailor(
     for job in pending:
         try:
             dest = t.tailor_job(job, profile, master, client, paths.OUT_DIR)
+            if n_flags := t.review_flag_count(dest):
+                typer.echo(f"warning: {n_flags} possible unsupported claim(s), see {dest / t.REVIEW_FLAGS_FILE}")
             typer.echo(f"wrote: {dest}")
             drafted.append(job.id)
         except Exception as e:  # keep going; one bad job shouldn't stop the batch
