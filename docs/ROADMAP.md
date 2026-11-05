@@ -4,9 +4,9 @@ Each milestone is sized for one Claude Code session. Paste the **Prompt** line i
 new cloud session (or local one), review the PR it opens, merge, then move to the next.
 
 ## M1 — Project skeleton
-- [ ] `pyproject.toml` deps filled in, `autoapply --help` works, `pytest` runs green.
-- [ ] Pydantic models: `Job`, `Profile`, `ScoreResult`, `ApplicationRecord`.
-- [ ] Config loader for `config/profile.yaml` + `config/companies.yaml` (fall back to the `.example` files).
+- [x] `pyproject.toml` deps filled in, `autoapply --help` works, `pytest` runs green.
+- [x] Pydantic models: `Job`, `Profile`, `ScoreResult`, `ApplicationRecord`.
+- [x] Config loader for `config/profile.yaml` + `config/companies.yaml` (fall back to the `.example` files).
 
 **Prompt:** "Implement milestone M1 in docs/ROADMAP.md. Follow CLAUDE.md. Add tests, make them pass, tick the boxes, and open a PR."
 

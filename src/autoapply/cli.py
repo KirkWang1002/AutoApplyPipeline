@@ -1,6 +1,24 @@
+"""Human-in-the-loop job application pipeline."""
 import typer
 
-app = typer.Typer(help="Job application pipeline: discover -> score -> tailor -> prefill -> track.")
+from autoapply.config import load_companies, load_profile
+
+app = typer.Typer(
+    help="Job application pipeline: discover -> score -> tailor -> prefill -> track.",
+    no_args_is_help=True,
+)
+
+
+@app.command()
+def config() -> None:
+    """Show the loaded profile and watched companies."""
+    profile = load_profile()
+    companies = load_companies()
+    typer.echo(f"Profile: {profile.name} <{profile.email}>")
+    typer.echo(f"Target titles: {', '.join(profile.target.titles)}")
+    for source in ("greenhouse", "lever", "ashby"):
+        boards = [c.board for c in getattr(companies, source)]
+        typer.echo(f"{source}: {', '.join(boards) or '-'}")
 
 
 @app.command()
