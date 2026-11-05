@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Lever-style form (fake)</title></head>
+<body>
+<script>window.__submitted = false;</script>
+<form onsubmit="window.__submitted = true; return false;">
+  <ul>
+    <li><label><div class="application-label">Resume/CV<span>✱</span></div>
+      <input type="file" name="resume" id="resume-upload-input"></label></li>
+    <li><label><div class="application-label">Full name<span>✱</span></div>
+      <div><input type="text" name="name"></div></label></li>
+    <li><label><div class="application-label">Email<span>✱</span></div>
+      <div><input type="email" name="email"></div></label></li>
+    <li><label><div class="application-label">Phone</div><div><input type="text" name="phone"></div></label></li>
+    <li><label><div class="application-label">Current company</div><div><input type="text" name="org"></div></label></li>
+    <li><label><div class="application-label">LinkedIn URL</div><div><input type="text" name="urls[LinkedIn]"></div></label></li>
+    <li><label><div class="application-label">GitHub URL</div><div><input type="text" name="urls[GitHub]"></div></label></li>
+    <li><label><div class="application-label">Portfolio URL</div><div><input type="text" name="urls[Portfolio]"></div></label></li>
+    <li><label><div class="application-label">Additional information</div>
+      <textarea name="comments"></textarea></label></li>
+  </ul>
+  <button type="submit">Submit application</button>
+</form>
+</body></html>

@@ -46,6 +46,8 @@ autoapply discover               # new matching postings -> data/jobs.jsonl
 autoapply discover --all         # preview everything, unfiltered (not saved)
 autoapply score --min 4          # Claude rates fit 1-5 (cached; re-runs are free)
 autoapply tailor                 # resume.md + cover_letter.md per good job -> out/<company>-<role>/
+autoapply pdf                    # render those to resume.pdf / cover_letter.pdf (ATS uploads want PDF)
+autoapply prefill <job_id>       # LOCAL ONLY: open the form, fill the basics, you review + Submit
 autoapply report                 # top jobs not applied yet + pending
 autoapply status <job_id> applied --notes "referral from X"
 ```
@@ -53,7 +55,25 @@ autoapply status <job_id> applied --notes "referral from X"
 Read every file in `out/` before using it, and check `REVIEW_FLAGS.txt` if one was
 written: it lists numbers / names in the draft that are not in your master resume.
 
-Run tests with `python -m pytest`.
+### Prefill (your own computer only)
+
+```bash
+pip install -e ".[prefill]"
+python -m playwright install chromium
+autoapply prefill greenhouse:acme:1234
+```
+
+A real Chrome window opens on the application form. autoapply fills only what it can
+match with confidence (name, email, phone, location, LinkedIn / GitHub / website,
+school, degree, resume + cover letter files) and outlines those fields in orange. It
+never overwrites what is already there, never touches checkboxes, dropdowns or
+free-text questions, and **never clicks Submit**. Review everything, answer the rest,
+submit, then close the window; it asks whether you submitted and, if yes, marks the job
+`applied`. If a form sits behind an "Apply" button on a company page, pass the direct
+form link with `--url`.
+
+Run tests with `python -m pytest` (browser tests are skipped if Playwright / Chromium
+are not installed; set `AUTOAPPLY_CHROMIUM` to use a specific Chromium binary).
 
 ## Rules
 

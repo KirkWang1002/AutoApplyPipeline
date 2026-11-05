@@ -26,12 +26,13 @@ new cloud session (or local one), review the PR it opens, merge, then move to th
 ## M4 — Tailor
 - [x] Read master resume from `resume/master.md` (or .tex). Produce `out/<company>-<role>/resume.md` and `cover_letter.md`.
 - [x] Never invent experience: the prompt may only reorder, rephrase and select from the master resume.
-- [ ] Optional: render to PDF.
+- [x] Optional: render to PDF (`autoapply pdf`, headless Chromium, JS off, network blocked).
 
 ## M5 — Track + report
 - [x] `data/applications.csv` with status column; CLI `autoapply status <job_id> applied`.
 - [x] `autoapply report` prints a table of today's top-scored jobs and what's pending.
 
 ## M6 — Prefill (local only)
-- [ ] Playwright script: open job URL, fill name / email / phone / links / upload resume from profile + `out/` folder.
-- [ ] Stops before Submit, leaves the browser open for me to review. Greenhouse + Lever forms first.
+- [x] Playwright script: open job URL, fill name / email / phone / links / upload resume from profile + `out/` folder.
+- [x] Stops before Submit, leaves the browser open for me to review. Greenhouse + Lever forms first (Ashby too).
+- [x] Safety: prefill only types into empty text fields and attaches files; a static test fails if `prefill.py` ever calls click / press / check / select / submit.

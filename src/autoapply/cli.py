@@ -215,5 +215,85 @@ def tailor(
         raise typer.Exit(1)
 
 
+@app.command()
+def pdf(
+    job_id: str = typer.Option(None, "--job-id", help="Render only this job's folder."),
+    force: bool = typer.Option(False, "--force", help="Re-render even if the PDF is newer than the .md."),
+) -> None:
+    """Render tailored resume.md / cover_letter.md in out/ to PDF (needs the "prefill" extra)."""
+    from autoapply import browser as br
+    from autoapply import paths, render, storage
+    from autoapply import tailor as t
+
+    if job_id:
+        job = next((j for j in storage.load_jobs(paths.JOBS_FILE) if j.id == job_id), None)
+        if job is None:
+            typer.echo(f"Job {job_id!r} not found in {paths.JOBS_FILE}", err=True)
+            raise typer.Exit(1)
+        folders = [t.output_dir(job, paths.OUT_DIR)]
+    else:
+        folders = sorted(d for d in paths.OUT_DIR.glob("*") if d.is_dir()) if paths.OUT_DIR.is_dir() else []
+    folders = [d for d in folders if t.is_tailored(d)]
+    if not folders:
+        typer.echo("Nothing to render. Run `autoapply tailor` first.")
+        return
+    try:
+        pw = br.start_playwright()
+        try:
+            b = br.launch_chromium(pw, headless=True)
+            written = [p for d in folders for p in render.render_folder(d, b, force=force)]
+            b.close()
+        finally:
+            pw.stop()
+    except br.BrowserUnavailable as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    for p in written:
+        typer.echo(f"wrote: {p}")
+    typer.echo(f"{len(written)} PDF(s) rendered, {len(folders)} folder(s) checked.")
+
+
+@app.command()
+def prefill(
+    job_id: str = typer.Argument(..., help="Job id, e.g. greenhouse:acme:123"),
+    url: str = typer.Option(None, "--url", help="Open this application URL instead of the derived one."),
+) -> None:
+    """Open the application form in a browser and fill the basics, then STOP (M6, local only).
+
+    Never clicks Submit. You review every field and submit yourself.
+    """
+    from autoapply import browser as br
+    from autoapply import paths, storage, track
+    from autoapply import prefill as pf
+    from autoapply import tailor as t
+    from autoapply.models import ApplicationStatus
+
+    job = next((j for j in storage.load_jobs(paths.JOBS_FILE) if j.id == job_id), None)
+    if job is None:
+        typer.echo(f"Job {job_id!r} not found in {paths.JOBS_FILE}", err=True)
+        raise typer.Exit(1)
+    dest = t.output_dir(job, paths.OUT_DIR)
+    if not t.is_tailored(dest):
+        typer.echo(f"warning: {job_id} is not tailored yet (`autoapply tailor --job-id {job_id}`).")
+        dest = None
+    try:
+        pf.run_prefill(job, load_profile(), dest, url=url, echo=typer.echo)
+    except br.BrowserUnavailable as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if not typer.confirm("Did you submit the application?", default=False):
+        typer.echo("Not marked applied.")
+        return
+    try:
+        records = track.sync_from_files(save=False)
+        track.set_status(records, job_id, ApplicationStatus.applied)
+        track.save_applications(records)
+    except (KeyError, track.ApplicationsFileLocked) as e:
+        typer.echo(f"Error: could not update the tracker: {e}", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"{job_id}: applied")
+
+
 if __name__ == "__main__":
     app()

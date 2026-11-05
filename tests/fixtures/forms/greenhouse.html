@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Greenhouse-style form (fake)</title></head>
+<body>
+<script>window.__submitted = false;</script>
+<form id="application-form" action="https://example.invalid/submit" method="post"
+      onsubmit="window.__submitted = true; return false;">
+  <label for="first_name">First Name *</label><input id="first_name" name="job_application[first_name]" type="text">
+  <label for="last_name">Last Name *</label><input id="last_name" name="job_application[last_name]" type="text">
+  <label for="email">Email *</label><input id="email" name="job_application[email]" type="text">
+  <label for="phone">Phone</label><input id="phone" name="job_application[phone]" type="text" value="already typed">
+  <label for="resume">Resume/CV</label><input id="resume" type="file" style="display:none">
+  <label for="cover_letter">Cover Letter</label><input id="cover_letter" type="file" style="display:none">
+  <label for="li">LinkedIn Profile</label><input id="li" name="job_application[answers][0][text_value]" type="text">
+  <label for="school">School</label><input id="school" type="text">
+  <label for="auth">Are you legally authorized to work in the US?</label>
+  <select id="auth"><option></option><option>Yes</option><option>No</option></select>
+  <input type="checkbox" id="consent"><label for="consent">I agree to receive emails</label>
+  <input type="text" name="website_url_honeypot" id="hp" style="display:none" aria-label="Website">
+  <input type="hidden" name="email_hidden" value="">
+  <button type="submit" id="submit_app">Submit Application</button>
+</form>
+</body></html>
