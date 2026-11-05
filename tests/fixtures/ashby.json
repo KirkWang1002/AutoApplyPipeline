@@ -9,7 +9,18 @@
       "isRemote": false,
       "isListed": true,
       "publishedAt": "2026-10-30T15:00:00.000+00:00",
-      "descriptionPlain": "Design power supplies."
+      "descriptionPlain": "Design power supplies.",
+      "secondaryLocations": [
+        {
+          "location": "Raleigh, NC",
+          "address": {
+            "postalAddress": {
+              "addressRegion": "North Carolina"
+            }
+          }
+        },
+        "Durham, NC"
+      ]
     },
     {
       "id": "0f1e2d3c-0002",
@@ -30,7 +41,8 @@
       "isListed": true,
       "publishedAt": null,
       "descriptionPlain": "",
-      "descriptionHtml": "<p>Fully <em>remote</em> internship.</p>"
+      "descriptionHtml": "<p>Fully <em>remote</em> internship.</p>",
+      "secondaryLocations": []
     },
     {
       "id": "0f1e2d3c-0004",
